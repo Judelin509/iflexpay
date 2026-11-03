@@ -4,12 +4,11 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  Copy,
   ShieldCheck,
-  CheckCircle2,
   Mail,
   RotateCcw,
-  Loader2
+  Loader2,
+  X
 } from 'lucide-react';
 import { PLANS, PlanId, PaymentMethod } from './types/payment';
 
@@ -28,18 +27,25 @@ const pageTransition = {
 };
 
 export default function App() {
-  // Screen steps: 1 = Choix du plan, 2 = Numéro de téléphone, 3 = Choix MonCash/NatCash, 4 = Confirmation
+  // Screen steps:
+  // 1 = Choix du plan
+  // 2 = Adresse Email
+  // 3 = Choix MonCash/NatCash & Numéro
+  // 4 = Confirmation & Code
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedPlanId, setSelectedPlanId] = useState<PlanId>('1semaine');
+  const [email, setEmail] = useState<string>('');
+  const [emailError, setEmailError] = useState<string>('');
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('moncash');
   const [phoneError, setPhoneError] = useState<string>('');
-  const [copied, setCopied] = useState<boolean>(false);
-  const [activationCode, setActivationCode] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isShockwave, setIsShockwave] = useState<boolean>(false);
 
   const selectedPlan = PLANS.find((p) => p.id === selectedPlanId) || PLANS[1];
+
+  // Helper email validation
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 
   // Helper to format 8 digits as XXXX-XXXX
   const formatPhone = (val: string) => {
@@ -70,35 +76,34 @@ export default function App() {
     setStep(2);
   };
 
-  const handleValidatePhone = (e: React.FormEvent) => {
+  const handleValidateEmail = (e: React.FormEvent) => {
     e.preventDefault();
-    if (phoneNumber.length !== 8) {
-      setPhoneError('Veuillez entrer un numéro haïtien valide à 8 chiffres.');
+    if (!isEmailValid) {
+      setEmailError('Veuillez entrer une adresse email valide.');
       return;
     }
+    setEmailError('');
     setStep(3);
   };
 
   const handleConfirmPayment = () => {
+    if (phoneNumber.length !== 8) {
+      setPhoneError('Veuillez entrer un numéro haïtien valide à 8 chiffres.');
+      return;
+    }
+
     setIsShockwave(true);
     setIsProcessing(true);
     setTimeout(() => {
-      const codePart1 = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const codePart2 = Math.random().toString(36).substring(2, 6).toUpperCase();
-      setActivationCode(`IFX-${codePart1}-${codePart2}`);
       setIsProcessing(false);
       setIsShockwave(false);
       setStep(4);
     }, 850);
   };
 
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(activationCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const handleRestart = () => {
+    setEmail('');
+    setEmailError('');
     setPhoneNumber('');
     setPhoneError('');
     setStep(1);
@@ -231,7 +236,7 @@ export default function App() {
             )}
 
             {/* ========================================================== */}
-            {/* ÉCRAN 2 : ENTRER TON NUMÉRO DE TÉLÉPHONE                    */}
+            {/* ÉCRAN 2 : ENTRER TON ADRESSE EMAIL                          */}
             {/* ========================================================== */}
             {step === 2 && (
               <motion.div
@@ -243,7 +248,7 @@ export default function App() {
                 transition={pageTransition}
               >
                 <form
-                  onSubmit={handleValidatePhone}
+                  onSubmit={handleValidateEmail}
                   className="space-y-6 flex flex-col justify-center"
                 >
                   {/* Forfait sélectionné */}
@@ -265,41 +270,101 @@ export default function App() {
 
                   <div className="text-center">
                     <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-                      Entre ton numéro de téléphone
+                      Entre ton adresse email
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Numéro MonCash ou NatCash pour recevoir la demande
+                      Ton abonnement IFlex sera directement activé sur ce compte
                     </p>
                   </div>
 
-                  <div>
-                    <div className="flex items-center bg-[#0E131F] border border-[#2563EB] rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 shadow-md">
-                      <span className="px-4 py-4 text-sm font-mono font-bold text-white bg-[#151D2F] border-r border-[#1E2638] select-none">
-                        +509
+                  <div className="space-y-2">
+                    <div
+                      className={`flex items-center bg-[#0E131F] border rounded-2xl overflow-hidden transition-all shadow-md ${
+                        isEmailValid
+                          ? 'border-emerald-500/80 ring-2 ring-emerald-500/30'
+                          : email.trim().length > 0
+                          ? 'border-amber-500/60 focus-within:ring-2 focus-within:ring-amber-500/30'
+                          : 'border-[#2563EB] focus-within:ring-2 focus-within:ring-blue-500'
+                      }`}
+                    >
+                      <span className="px-4 py-4 text-slate-400 bg-[#151D2F] border-r border-[#1E2638] select-none flex items-center justify-center">
+                        <Mail className="w-5 h-5 text-blue-400" />
                       </span>
                       <input
-                        type="tel"
+                        type="email"
                         autoFocus
-                        value={formatPhone(phoneNumber)}
-                        onChange={handlePhoneInput}
-                        placeholder="3712-4589"
-                        className="w-full px-4 py-4 bg-transparent text-white font-mono text-lg font-bold placeholder-slate-600 focus:outline-none tracking-wider"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setEmailError('');
+                        }}
+                        placeholder="tonemail@gmail.com"
+                        className="w-full px-4 py-4 bg-transparent text-white text-base font-medium placeholder-slate-600 focus:outline-none"
                         required
                       />
+
+                      {/* Indicateur visuel temps réel email (check / croix) */}
+                      <div className="pr-4 pl-2 shrink-0 flex items-center">
+                        {isEmailValid ? (
+                          <motion.div
+                            key="valid-email"
+                            initial={{ scale: 0.4, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="w-7 h-7 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400"
+                            title="Format email valide"
+                          >
+                            <Check className="w-4 h-4 stroke-[2.5]" />
+                          </motion.div>
+                        ) : email.trim().length > 0 ? (
+                          <motion.div
+                            key="invalid-email"
+                            initial={{ scale: 0.4, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="w-7 h-7 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400"
+                            title="Format email incomplet"
+                          >
+                            <X className="w-4 h-4 stroke-[2.5]" />
+                          </motion.div>
+                        ) : null}
+                      </div>
                     </div>
 
-                    {phoneError && (
-                      <p className="text-xs text-red-400 mt-2 text-center font-medium">
-                        {phoneError}
+                    {/* État de conformité email */}
+                    <div className="flex items-center justify-between text-xs px-1">
+                      <span
+                        className={
+                          isEmailValid
+                            ? 'text-emerald-400 font-medium'
+                            : email.trim().length > 0
+                            ? 'text-slate-400'
+                            : 'text-slate-500'
+                        }
+                      >
+                        {isEmailValid
+                          ? 'Adresse email conforme'
+                          : email.trim().length > 0
+                          ? 'Saisie de l’email en cours'
+                          : 'Exemple : utilisateur@gmail.com'}
+                      </span>
+                    </div>
+
+                    {emailError && (
+                      <p className="text-xs text-red-400 mt-1 text-center font-medium">
+                        {emailError}
                       </p>
                     )}
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-4 px-6 bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-[0.99] text-white font-bold text-base rounded-2xl transition-all shadow-lg shadow-blue-700/30 flex items-center justify-center gap-2 cursor-pointer"
+                    disabled={!isEmailValid}
+                    className={`w-full py-4 px-6 font-bold text-base rounded-2xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                      isEmailValid
+                        ? 'bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-[0.99] text-white shadow-blue-700/30'
+                        : 'bg-[#151D2F] text-slate-500 border border-[#1E2638] cursor-not-allowed shadow-none'
+                    }`}
                   >
-                    <span>Continuer</span>
+                    <span>Continuer vers le paiement</span>
                     <ArrowRight className="w-5 h-5" />
                   </button>
                 </form>
@@ -307,7 +372,7 @@ export default function App() {
             )}
 
             {/* ========================================================== */}
-            {/* ÉCRAN 3 : CHOISIR MONCASH OU NATCASH                        */}
+            {/* ÉCRAN 3 : CHOISIR MONCASH OU NATCASH & NUMÉRO               */}
             {/* ========================================================== */}
             {step === 3 && (
               <motion.div
@@ -317,17 +382,17 @@ export default function App() {
                 animate="animate"
                 exit="exit"
                 transition={pageTransition}
-                className="space-y-6 flex flex-col justify-center"
+                className="space-y-5 flex flex-col justify-center"
               >
                 {/* Récapitulatif rapide */}
                 <div className="p-3.5 rounded-xl bg-[#0E131F] border border-[#1E2638] flex items-center justify-between text-xs">
                   <div>
-                    <span className="text-slate-400">Forfait :</span>{' '}
-                    <strong className="text-white">{selectedPlan.duration}</strong>
+                    <span className="text-slate-400">Plan :</span>{' '}
+                    <strong className="text-white">{selectedPlan.duration} ({selectedPlan.priceHTG} HTG)</strong>
                   </div>
-                  <div>
-                    <span className="text-slate-400">Numéro :</span>{' '}
-                    <strong className="text-white font-mono">+509 {formatPhone(phoneNumber)}</strong>
+                  <div className="max-w-[170px] truncate text-right">
+                    <span className="text-slate-400">Compte :</span>{' '}
+                    <strong className="text-blue-400 font-mono truncate" title={email}>{email}</strong>
                   </div>
                 </div>
 
@@ -336,42 +401,41 @@ export default function App() {
                     Choisis ton moyen de paiement
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    Sélectionne MonCash ou NatCash pour payer
+                    Sélectionne MonCash ou NatCash et entre ton numéro
                   </p>
                 </div>
 
                 {/* Options MonCash / NatCash */}
-                <div className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-3">
                   {/* Option MonCash */}
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('moncash')}
-                    className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                       paymentMethod === 'moncash'
-                        ? 'bg-[#131D36] border-[#2563EB] ring-1 ring-blue-500 shadow-lg shadow-blue-900/30'
+                        ? 'bg-[#131D36] border-[#2563EB] ring-1 ring-blue-500 shadow-md shadow-blue-900/30'
                         : 'bg-[#0E131F] border-[#1E2638] hover:border-slate-600'
                     }`}
                   >
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-11 h-11 rounded-xl bg-red-600/20 border border-red-500/40 flex items-center justify-center font-bold text-red-400 text-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-red-600/20 border border-red-500/40 flex items-center justify-center font-bold text-red-400 text-xs">
                         MC
                       </div>
-                      <div>
-                        <div className="text-base font-bold text-white">MonCash</div>
-                        <div className="text-xs text-slate-400">Digicel Haïti (*202#)</div>
+                      <div
+                        className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
+                          paymentMethod === 'moncash'
+                            ? 'border-[#2563EB] bg-[#2563EB]'
+                            : 'border-slate-600'
+                        }`}
+                      >
+                        {paymentMethod === 'moncash' && (
+                          <div className="w-2 h-2 rounded-full bg-white" />
+                        )}
                       </div>
                     </div>
-
-                    <div
-                      className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
-                        paymentMethod === 'moncash'
-                          ? 'border-[#2563EB] bg-[#2563EB]'
-                          : 'border-slate-600'
-                      }`}
-                    >
-                      {paymentMethod === 'moncash' && (
-                        <div className="w-2.5 h-2.5 rounded-full bg-white" />
-                      )}
+                    <div>
+                      <div className="text-sm font-bold text-white">MonCash</div>
+                      <div className="text-[11px] text-slate-400">Digicel (*202#)</div>
                     </div>
                   </button>
 
@@ -379,38 +443,101 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('natcash')}
-                    className={`w-full p-4 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                       paymentMethod === 'natcash'
-                        ? 'bg-[#131D36] border-[#2563EB] ring-1 ring-blue-500 shadow-lg shadow-blue-900/30'
+                        ? 'bg-[#131D36] border-[#2563EB] ring-1 ring-blue-500 shadow-md shadow-blue-900/30'
                         : 'bg-[#0E131F] border-[#1E2638] hover:border-slate-600'
                     }`}
                   >
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-11 h-11 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center font-bold text-blue-400 text-sm">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center font-bold text-blue-400 text-xs">
                         NC
                       </div>
-                      <div>
-                        <div className="text-base font-bold text-white">NatCash</div>
-                        <div className="text-xs text-slate-400">Natcom Haïti (*101#)</div>
+                      <div
+                        className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
+                          paymentMethod === 'natcash'
+                            ? 'border-[#2563EB] bg-[#2563EB]'
+                            : 'border-slate-600'
+                        }`}
+                      >
+                        {paymentMethod === 'natcash' && (
+                          <div className="w-2 h-2 rounded-full bg-white" />
+                        )}
                       </div>
                     </div>
-
-                    <div
-                      className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
-                        paymentMethod === 'natcash'
-                          ? 'border-[#2563EB] bg-[#2563EB]'
-                          : 'border-slate-600'
-                      }`}
-                    >
-                      {paymentMethod === 'natcash' && (
-                        <div className="w-2.5 h-2.5 rounded-full bg-white" />
-                      )}
+                    <div>
+                      <div className="text-sm font-bold text-white">NatCash</div>
+                      <div className="text-[11px] text-slate-400">Natcom (*101#)</div>
                     </div>
                   </button>
                 </div>
 
+                {/* Saisie du Numéro MonCash ou NatCash avec validation temps réel */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between text-xs px-1">
+                    <label className="text-slate-300 font-medium">
+                      Numéro {paymentMethod === 'moncash' ? 'MonCash (Digicel)' : 'NatCash (Natcom)'}
+                    </label>
+                    <span className="text-slate-400 text-[11px]">8 chiffres haïtiens</span>
+                  </div>
+
+                  <div
+                    className={`flex items-center bg-[#0E131F] border rounded-2xl overflow-hidden transition-all shadow-md ${
+                      phoneNumber.length === 8
+                        ? 'border-emerald-500/80 ring-2 ring-emerald-500/30'
+                        : phoneNumber.length > 0
+                        ? 'border-amber-500/60 focus-within:ring-2 focus-within:ring-amber-500/30'
+                        : 'border-[#2563EB] focus-within:ring-2 focus-within:ring-blue-500'
+                    }`}
+                  >
+                    <span className="px-4 py-3.5 text-sm font-mono font-bold text-white bg-[#151D2F] border-r border-[#1E2638] select-none">
+                      +509
+                    </span>
+                    <input
+                      type="tel"
+                      autoFocus
+                      value={formatPhone(phoneNumber)}
+                      onChange={handlePhoneInput}
+                      placeholder="3712-4589"
+                      className="w-full px-4 py-3.5 bg-transparent text-white font-mono text-lg font-bold placeholder-slate-600 focus:outline-none tracking-wider"
+                      required
+                    />
+
+                    {/* Indicateur visuel temps réel (check / croix) */}
+                    <div className="pr-4 pl-2 shrink-0 flex items-center">
+                      {phoneNumber.length === 8 ? (
+                        <motion.div
+                          key="valid-phone"
+                          initial={{ scale: 0.4, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          className="w-7 h-7 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400"
+                          title="Numéro valide (8 chiffres)"
+                        >
+                          <Check className="w-4 h-4 stroke-[2.5]" />
+                        </motion.div>
+                      ) : phoneNumber.length > 0 ? (
+                        <motion.div
+                          key="invalid-phone"
+                          initial={{ scale: 0.4, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          className="w-7 h-7 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400"
+                          title={`${phoneNumber.length}/8 chiffres`}
+                        >
+                          <X className="w-4 h-4 stroke-[2.5]" />
+                        </motion.div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {phoneError && (
+                    <p className="text-xs text-red-400 text-center font-medium">
+                      {phoneError}
+                    </p>
+                  )}
+                </div>
+
                 {/* Bouton de confirmation avec effet de validation onde de choc / éclat */}
-                <div className="relative mt-4">
+                <div className="relative pt-1">
                   {/* Anneaux d'onde de choc extérieurs lors du clic */}
                   {isShockwave && (
                     <>
@@ -431,14 +558,16 @@ export default function App() {
 
                   <motion.button
                     type="button"
-                    disabled={isProcessing}
+                    disabled={isProcessing || phoneNumber.length !== 8}
                     onClick={handleConfirmPayment}
                     animate={isShockwave ? { scale: [1, 0.97, 1.02, 1] } : {}}
                     transition={{ duration: 0.35, ease: 'easeInOut' }}
                     className={`relative overflow-hidden w-full py-4 px-6 font-bold text-base rounded-2xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                      isProcessing
-                        ? 'bg-[#1D4ED8] shadow-blue-500/50 ring-2 ring-blue-400 text-white'
-                        : 'bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-[0.99] text-white shadow-blue-700/30'
+                      phoneNumber.length === 8
+                        ? isProcessing
+                          ? 'bg-[#1D4ED8] shadow-blue-500/50 ring-2 ring-blue-400 text-white'
+                          : 'bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-[0.99] text-white shadow-blue-700/30'
+                        : 'bg-[#151D2F] text-slate-500 border border-[#1E2638] cursor-not-allowed shadow-none'
                     }`}
                   >
                     {/* Éclat lumineux traversant le bouton (balayage flash) */}
@@ -482,66 +611,68 @@ export default function App() {
                 animate="animate"
                 exit="exit"
                 transition={pageTransition}
-                className="space-y-6 flex flex-col justify-center"
+                className="space-y-5 flex flex-col justify-center"
               >
-                <div className="text-center">
-                  <div className="w-14 h-14 bg-emerald-500/20 border border-emerald-500/40 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                {/* Statut Réussi avec petit icône */}
+                <div className="text-center space-y-2">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mx-auto text-emerald-400 shadow-md shadow-emerald-950/40">
+                    <Check className="w-6 h-6 stroke-[3]" />
                   </div>
                   <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-                    Paiement en cours de validation
+                    Paiement réussi
                   </h2>
-                  <p className="text-xs text-slate-300 mt-1 max-w-xs mx-auto">
-                    Valide la transaction de{' '}
-                    <strong className="text-white">{selectedPlan.priceHTG} Gourdes</strong>{' '}
-                    sur ton téléphone{' '}
-                    <span className="font-mono text-blue-400">
-                      +509 {formatPhone(phoneNumber)}
-                    </span>{' '}
-                    via{' '}
-                    <strong className="text-white capitalize">{paymentMethod}</strong>.
+                  <p className="text-xs text-slate-300">
+                    Ton abonnement IFlex est activé avec succès.
                   </p>
                 </div>
 
-                {/* Code d'activation */}
-                <div className="p-4 bg-[#0E131F] border border-[#2563EB] rounded-2xl text-center space-y-2 shadow-lg">
-                  <div className="text-[11px] text-slate-400 uppercase tracking-wider">
-                    Ton Code d'Activation IFlex
+                {/* Petites infos du compte et de la transaction */}
+                <div className="p-4 bg-[#0E131F] border border-[#1E2638] rounded-2xl text-xs space-y-3">
+                  <div className="flex items-center justify-between pb-2.5 border-b border-[#1A2338]">
+                    <span className="text-slate-400">Statut :</span>
+                    <span className="text-emerald-400 font-semibold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      Paiement confirmé
+                    </span>
                   </div>
-                  <div className="text-2xl font-bold font-mono tracking-widest text-white">
-                    {activationCode}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleCopyCode}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1B253D] hover:bg-[#2563EB] text-xs font-semibold rounded-lg transition-colors cursor-pointer text-white"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copied ? 'Copié !' : 'Copier le code'}</span>
-                  </button>
-                </div>
 
-                <div className="p-3 bg-[#0E131F] border border-[#1E2638] rounded-xl text-xs space-y-1.5 text-slate-400">
-                  <div className="flex justify-between">
-                    <span>Abonnement :</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Compte (Email) :</span>
+                    <strong className="text-blue-400 font-mono text-xs truncate max-w-[200px]" title={email}>
+                      {email}
+                    </strong>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Abonnement :</span>
                     <strong className="text-white">{selectedPlan.duration}</strong>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Montant :</span>
-                    <strong className="text-white font-mono">{selectedPlan.priceHTG} Gourdes</strong>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Montant :</span>
+                    <strong className="text-white font-mono text-sm">{selectedPlan.priceHTG} Gourdes</strong>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Moyen :</span>
-                    <strong className="text-white uppercase">{paymentMethod}</strong>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Numéro :</span>
+                    <strong className="text-white font-mono">+509 {formatPhone(phoneNumber)}</strong>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-[#1A2338]">
+                    <span className="text-slate-400">Moyen de paiement :</span>
+                    <strong className="text-white uppercase font-semibold">
+                      {paymentMethod === 'moncash' ? 'MonCash (Digicel)' : 'NatCash (Natcom)'}
+                    </strong>
                   </div>
                 </div>
 
+                {/* Bouton pour effectuer un autre paiement */}
                 <button
                   type="button"
                   onClick={handleRestart}
-                  className="w-full py-3 px-4 bg-[#151D2F] hover:bg-[#1E293B] text-slate-300 hover:text-white font-medium text-xs rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3.5 px-4 bg-[#151D2F] hover:bg-[#1E2638] text-slate-200 hover:text-white font-medium text-xs rounded-xl transition-all border border-[#1E2638] flex items-center justify-center gap-2 cursor-pointer shadow-md"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
+                  <RotateCcw className="w-4 h-4 text-blue-400" />
                   <span>Effectuer un autre paiement</span>
                 </button>
               </motion.div>
