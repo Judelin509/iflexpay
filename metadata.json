@@ -1,0 +1,6 @@
+{
+  "name": "IFlex Pay — Portail de Paiement Streaming (MonCash & NatCash)",
+  "description": "Portail officiel de paiement en ligne paye.iflexstream.site pour IFlex Streaming en Haïti. Payez votre abonnement (100 HTG/jour, 500 HTG/semaine, 1500 HTG/mois) rapidement via MonCash et NatCash.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
