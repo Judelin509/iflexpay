@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection
+    match /users/{userId} {
+      allow read: if true;
+      allow update: if true;
+    }
+
+    // Transactions collection (Tranzak records)
+    match /transactions/{transactionId} {
+      allow read, write, delete: if true;
+    }
+
+    // Payments collection
+    match /payments/{paymentId} {
+      allow read, write, delete: if true;
+    }
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "IFlex Streaming user account with subscription tier and payment metadata",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "UID Firebase Auth"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Optional user display name"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "editor", "user"],
+          "description": "User role"
+        },
+        "subscriptionTier": {
+          "type": "string",
+          "enum": ["free", "vip_1day", "vip_1week", "vip_1month", "vip_ultra"],
+          "description": "Current active subscription tier"
+        },
+        "coinsBalance": {
+          "type": "number",
+          "description": "User coins balance"
+        },
+        "totalCoinsSpent": {
+          "type": "number",
+          "description": "Total coins spent by user"
+        },
+        "totalAdsWatched": {
+          "type": "number",
+          "description": "Total ads watched by user"
+        },
+        "totalWatchTimeMinutes": {
+          "type": "number",
+          "description": "Optional total watch time in minutes"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "suspended"],
+          "description": "Account status"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO creation timestamp"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["moncash", "natcash"],
+          "description": "Last mobile money payment method used"
+        },
+        "paymentPhone": {
+          "type": "string",
+          "description": "Phone number used for subscription payment"
+        },
+        "subscriptionStartDate": {
+          "type": "string",
+          "description": "Exact ISO purchase timestamp"
+        },
+        "subscriptionEndDate": {
+          "type": "string",
+          "description": "Exact ISO expiration timestamp"
+        }
+      },
+      "required": ["id", "email", "role", "subscriptionTier", "coinsBalance", "totalCoinsSpent", "totalAdsWatched", "status", "createdAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Tranzak mobile money payment transaction record for IFlex Streaming",
+      "type": "object",
+      "properties": {
+        "transactionId": {
+          "type": "string",
+          "description": "Unique Tranzak transaction identifier"
+        },
+        "userId": {
+          "type": "string",
+          "description": "IFlex user document identifier"
+        },
+        "userEmail": {
+          "type": "string",
+          "description": "Customer account email"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Payment amount in Gourdes (100, 500, 1500)"
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency code (HTG)"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "enum": ["moncash", "natcash"],
+          "description": "Mobile money operator"
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Phone number used for payment"
+        },
+        "planId": {
+          "type": "string",
+          "description": "Selected plan identifier"
+        },
+        "subscriptionTier": {
+          "type": "string",
+          "description": "Associated subscription tier"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["SUCCESS", "PENDING", "FAILED"],
+          "description": "Transaction status"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp"
+        }
+      },
+      "required": ["transactionId", "userId", "userEmail", "amount", "currency", "paymentMethod", "phoneNumber", "planId", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of IFlex users and their active subscription status"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Collection of Tranzak mobile money payment transactions"
+    }
+  }
+}

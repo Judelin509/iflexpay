@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -8,9 +8,23 @@ import {
   Mail,
   RotateCcw,
   Loader2,
-  X
+  X,
+  UserCheck
 } from 'lucide-react';
-import { PLANS, PlanId, PaymentMethod } from './types/payment';
+import {
+  PLANS,
+  PlanId,
+  PaymentMethod,
+  IFlexUser,
+  IFlexUserSubscriptionDetails,
+} from './types/payment';
+import {
+  syncExpiredSubscriptionsOnLoad,
+  findUserByEmail,
+  activateUserSubscription,
+} from './services/userSubscriptionService';
+import { PaymentReturnPage } from './components/PaymentReturnPage';
+import { PaymentCancelPage } from './components/PaymentCancelPage';
 
 const LOGO_URL = 'https://i.ibb.co/gnKfwcq/1000320493.png';
 
@@ -27,22 +41,45 @@ const pageTransition = {
 };
 
 export default function App() {
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+
+  // Dedicated page for Redirect URL (Success): /payment/return
+  if (pathname.includes('/payment/return')) {
+    return <PaymentReturnPage />;
+  }
+
+  // Dedicated page for Cancel URL: /payment/cancel
+  if (pathname.includes('/payment/cancel')) {
+    return <PaymentCancelPage />;
+  }
+
   // Screen steps:
   // 1 = Choix du plan
-  // 2 = Adresse Email
+  // 2 = Adresse Email (vérification dans Firestore `users`)
   // 3 = Choix MonCash/NatCash & Numéro
-  // 4 = Confirmation & Code
+  // 4 = Confirmation & Détails de l'abonnement activé
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedPlanId, setSelectedPlanId] = useState<PlanId>('1semaine');
   const [email, setEmail] = useState<string>('');
   const [emailError, setEmailError] = useState<string>('');
+  const [isCheckingEmail, setIsCheckingEmail] = useState<boolean>(false);
+  const [matchedUser, setMatchedUser] = useState<IFlexUser | null>(null);
+
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('moncash');
   const [phoneError, setPhoneError] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isShockwave, setIsShockwave] = useState<boolean>(false);
+  const [activatedDetails, setActivatedDetails] =
+    useState<IFlexUserSubscriptionDetails | null>(null);
+  const [tranzakTxId, setTranzakTxId] = useState<string>('');
 
   const selectedPlan = PLANS.find((p) => p.id === selectedPlanId) || PLANS[1];
+
+  // Dès que le site s'ouvre, on met à jour tous les abonnements expirés dans Firestore `users` -> 'free'
+  useEffect(() => {
+    syncExpiredSubscriptionsOnLoad();
+  }, []);
 
   // Helper email validation
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
@@ -76,37 +113,138 @@ export default function App() {
     setStep(2);
   };
 
-  const handleValidateEmail = (e: React.FormEvent) => {
+  // Étape 2 : Vérifier l'email dans la collection Firestore `users`
+  const handleValidateEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isEmailValid) {
       setEmailError('Veuillez entrer une adresse email valide.');
       return;
     }
+
     setEmailError('');
-    setStep(3);
+    setIsCheckingEmail(true);
+
+    try {
+      const userDoc = await findUserByEmail(email);
+
+      if (!userDoc) {
+        setEmailError(
+          "Aucun compte IFlex trouvé avec cet email. Vérifie l'adresse email de ton compte IFlex."
+        );
+        setIsCheckingEmail(false);
+        return;
+      }
+
+      if (userDoc.status === 'suspended') {
+        setEmailError(
+          'Ce compte IFlex est actuellement suspendu. Contacte le support iflextv.film@gmail.com.'
+        );
+        setIsCheckingEmail(false);
+        return;
+      }
+
+      setMatchedUser(userDoc);
+      setIsCheckingEmail(false);
+      setStep(3);
+    } catch (error) {
+      console.error('Erreur lors de la vérification du compte:', error);
+      setEmailError(
+        'Impossible de vérifier le compte dans Firestore. Vérifie ta connexion ou les règles Firestore.'
+      );
+      setIsCheckingEmail(false);
+    }
   };
 
-  const handleConfirmPayment = () => {
+  // Étape 3 : Payer et mettre à jour le document exact `users/{userId}` dans Firestore
+  const handleConfirmPayment = async () => {
     if (phoneNumber.length !== 8) {
       setPhoneError('Veuillez entrer un numéro haïtien valide à 8 chiffres.');
       return;
     }
 
+    if (!matchedUser) {
+      setStep(2);
+      return;
+    }
+
     setIsShockwave(true);
     setIsProcessing(true);
-    setTimeout(() => {
+    setPhoneError('');
+
+    try {
+      const formattedPhone = `+509 ${formatPhone(phoneNumber)}`;
+      const { subscriptionDetails: subDetails, transactionId } =
+        await activateUserSubscription({
+          userDocId: matchedUser.docId,
+          userEmail: matchedUser.email,
+          plan: selectedPlan,
+          paymentMethod,
+          formattedPhone,
+        });
+
+      setTranzakTxId(transactionId);
+      setActivatedDetails(subDetails);
+      setMatchedUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              subscriptionTier: selectedPlan.tier,
+              paymentMethod,
+              paymentPhone: formattedPhone,
+              subscriptionStartDate: subDetails.purchaseDate,
+              subscriptionEndDate: subDetails.endDate,
+              subscriptionDetails: subDetails,
+            }
+          : null
+      );
+
+      // Attempt Tranzak online gateway creation
+      try {
+        const tranzakRes = await fetch('/api/payments/tranzak/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount: selectedPlan.priceHTG,
+            currency: 'HTG',
+            payment_method: paymentMethod,
+            phone: formattedPhone,
+            customer_email: matchedUser.email,
+            reference: transactionId,
+          }),
+        });
+        const tranzakData = await tranzakRes.json();
+        if (tranzakData?.paymentUrl) {
+          window.location.href = tranzakData.paymentUrl;
+          return;
+        }
+      } catch (e) {
+        console.warn('Tranzak create call notice:', e);
+      }
+
+      setTimeout(() => {
+        setIsProcessing(false);
+        setIsShockwave(false);
+        setStep(4);
+      }, 650);
+    } catch (err) {
+      console.error('Erreur mise à jour abonnement Firestore:', err);
       setIsProcessing(false);
       setIsShockwave(false);
-      setStep(4);
-    }, 850);
+      setPhoneError(
+        "Erreur lors de l'activation sur Firestore. Vérifie les autorisations de la collection users."
+      );
+    }
   };
 
   const handleRestart = () => {
     setEmail('');
     setEmailError('');
+    setMatchedUser(null);
+    setActivatedDetails(null);
     setPhoneNumber('');
     setPhoneError('');
     setStep(1);
+    syncExpiredSubscriptionsOnLoad();
   };
 
   return (
@@ -123,7 +261,6 @@ export default function App() {
 
       {/* Mobile container centered on screen */}
       <div className="w-full max-w-md mx-auto flex-1 flex flex-col px-5 py-6 sm:py-8">
-        
         {/* Navigation Bar / Header */}
         <div className="flex items-center justify-between min-h-[44px] mb-6">
           {step > 1 && step < 4 ? (
@@ -202,7 +339,7 @@ export default function App() {
                       >
                         <div>
                           <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
-                            Abonnement
+                            Abonnement · {plan.tier}
                           </div>
                           <div className="text-lg font-bold text-white mt-0.5">
                             {plan.duration}
@@ -236,7 +373,7 @@ export default function App() {
             )}
 
             {/* ========================================================== */}
-            {/* ÉCRAN 2 : ENTRER TON ADRESSE EMAIL                          */}
+            {/* ÉCRAN 2 : ENTRER TON ADRESSE EMAIL (VÉRIFICATION USERS)    */}
             {/* ========================================================== */}
             {step === 2 && (
               <motion.div
@@ -255,7 +392,7 @@ export default function App() {
                   <div className="p-3.5 rounded-xl bg-[#0E131F] border border-[#1E2638] flex items-center justify-between">
                     <div>
                       <div className="text-[11px] text-slate-400 uppercase tracking-wider">
-                        Plan sélectionné
+                        Plan sélectionné ({selectedPlan.tier})
                       </div>
                       <div className="text-sm font-bold text-white">
                         {selectedPlan.duration}
@@ -273,7 +410,7 @@ export default function App() {
                       Entre ton adresse email
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Ton abonnement IFlex sera directement activé sur ce compte
+                      L'email de ton compte utilisateur sur l'application IFlex
                     </p>
                   </div>
 
@@ -341,7 +478,7 @@ export default function App() {
                         }
                       >
                         {isEmailValid
-                          ? 'Adresse email conforme'
+                          ? 'Format valide · Vérification du compte IFlex au clic'
                           : email.trim().length > 0
                           ? 'Saisie de l’email en cours'
                           : 'Exemple : utilisateur@gmail.com'}
@@ -349,23 +486,32 @@ export default function App() {
                     </div>
 
                     {emailError && (
-                      <p className="text-xs text-red-400 mt-1 text-center font-medium">
+                      <div className="p-3 rounded-xl bg-red-950/60 border border-red-800/80 text-xs text-red-300 text-center font-medium">
                         {emailError}
-                      </p>
+                      </div>
                     )}
                   </div>
 
                   <button
                     type="submit"
-                    disabled={!isEmailValid}
+                    disabled={!isEmailValid || isCheckingEmail}
                     className={`w-full py-4 px-6 font-bold text-base rounded-2xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                      isEmailValid
+                      isEmailValid && !isCheckingEmail
                         ? 'bg-[#2563EB] hover:bg-[#1D4ED8] active:scale-[0.99] text-white shadow-blue-700/30'
                         : 'bg-[#151D2F] text-slate-500 border border-[#1E2638] cursor-not-allowed shadow-none'
                     }`}
                   >
-                    <span>Continuer vers le paiement</span>
-                    <ArrowRight className="w-5 h-5" />
+                    {isCheckingEmail ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
+                        <span>Recherche du compte IFlex...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Continuer vers le paiement</span>
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
                   </button>
                 </form>
               </motion.div>
@@ -384,15 +530,27 @@ export default function App() {
                 transition={pageTransition}
                 className="space-y-5 flex flex-col justify-center"
               >
-                {/* Récapitulatif rapide */}
-                <div className="p-3.5 rounded-xl bg-[#0E131F] border border-[#1E2638] flex items-center justify-between text-xs">
-                  <div>
-                    <span className="text-slate-400">Plan :</span>{' '}
-                    <strong className="text-white">{selectedPlan.duration} ({selectedPlan.priceHTG} HTG)</strong>
+                {/* Compte trouvé dans Firestore + Plan */}
+                <div className="p-3.5 rounded-xl bg-[#0E131F] border border-[#1E2638] space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 flex items-center gap-1.5">
+                      <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Compte IFlex vérifié :</span>
+                    </span>
+                    <strong className="text-emerald-400 font-mono truncate max-w-[180px]">
+                      {matchedUser?.displayName || matchedUser?.email}
+                    </strong>
                   </div>
-                  <div className="max-w-[170px] truncate text-right">
-                    <span className="text-slate-400">Compte :</span>{' '}
-                    <strong className="text-blue-400 font-mono truncate" title={email}>{email}</strong>
+                  <div className="flex items-center justify-between pt-1.5 border-t border-[#182033]">
+                    <div>
+                      <span className="text-slate-400">Activation :</span>{' '}
+                      <strong className="text-white">
+                        {selectedPlan.duration} ({selectedPlan.tier})
+                      </strong>
+                    </div>
+                    <strong className="text-blue-400 font-mono">
+                      {selectedPlan.priceHTG} HTG
+                    </strong>
                   </div>
                 </div>
 
@@ -476,9 +634,14 @@ export default function App() {
                 <div className="space-y-2 pt-1">
                   <div className="flex items-center justify-between text-xs px-1">
                     <label className="text-slate-300 font-medium">
-                      Numéro {paymentMethod === 'moncash' ? 'MonCash (Digicel)' : 'NatCash (Natcom)'}
+                      Numéro{' '}
+                      {paymentMethod === 'moncash'
+                        ? 'MonCash (Digicel)'
+                        : 'NatCash (Natcom)'}
                     </label>
-                    <span className="text-slate-400 text-[11px]">8 chiffres haïtiens</span>
+                    <span className="text-slate-400 text-[11px]">
+                      8 chiffres haïtiens
+                    </span>
                   </div>
 
                   <div
@@ -538,14 +701,18 @@ export default function App() {
 
                 {/* Bouton de confirmation avec effet de validation onde de choc / éclat */}
                 <div className="relative pt-1">
-                  {/* Anneaux d'onde de choc extérieurs lors du clic */}
                   {isShockwave && (
                     <>
                       <motion.span
                         className="absolute -inset-1 rounded-2xl border-2 border-[#60A5FA] pointer-events-none z-10"
                         initial={{ scale: 1, opacity: 0.95 }}
                         animate={{ scale: 1.18, opacity: 0 }}
-                        transition={{ duration: 0.75, ease: 'easeOut', repeat: Infinity, repeatDelay: 0.1 }}
+                        transition={{
+                          duration: 0.75,
+                          ease: 'easeOut',
+                          repeat: Infinity,
+                          repeatDelay: 0.1,
+                        }}
                       />
                       <motion.span
                         className="absolute -inset-2 rounded-2xl bg-[#3B82F6]/30 blur-md pointer-events-none z-0"
@@ -570,7 +737,6 @@ export default function App() {
                         : 'bg-[#151D2F] text-slate-500 border border-[#1E2638] cursor-not-allowed shadow-none'
                     }`}
                   >
-                    {/* Éclat lumineux traversant le bouton (balayage flash) */}
                     {isShockwave && (
                       <motion.span
                         className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent skew-x-12 pointer-events-none"
@@ -583,7 +749,9 @@ export default function App() {
                     {isProcessing ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin text-white shrink-0" />
-                        <span className="tracking-wide">Envoi de la demande en cours...</span>
+                        <span className="tracking-wide">
+                          Envoi de la demande en cours...
+                        </span>
                       </>
                     ) : (
                       <>
@@ -626,44 +794,90 @@ export default function App() {
                   </p>
                 </div>
 
-                {/* Petites infos du compte et de la transaction */}
+                {/* Petites infos du compte et de la transaction enregistrées dans users/{userId} */}
                 <div className="p-4 bg-[#0E131F] border border-[#1E2638] rounded-2xl text-xs space-y-3">
                   <div className="flex items-center justify-between pb-2.5 border-b border-[#1A2338]">
                     <span className="text-slate-400">Statut :</span>
                     <span className="text-emerald-400 font-semibold flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                      Paiement confirmé
+                      <Check className="w-3.5 h-3.5" />
+                      <span>
+                        Actif ({selectedPlan.tier})
+                      </span>
                     </span>
                   </div>
 
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Compte (Email) :</span>
-                    <strong className="text-blue-400 font-mono text-xs truncate max-w-[200px]" title={email}>
-                      {email}
+                    <strong
+                      className="text-blue-400 font-mono text-xs truncate max-w-[200px]"
+                      title={matchedUser?.email || email}
+                    >
+                      {matchedUser?.email || email}
                     </strong>
                   </div>
 
+                  {matchedUser?.displayName && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Utilisateur :</span>
+                      <strong className="text-white">
+                        {matchedUser.displayName}
+                      </strong>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Abonnement :</span>
-                    <strong className="text-white">{selectedPlan.duration}</strong>
+                    <strong className="text-white">
+                      {selectedPlan.duration} ({selectedPlan.tier})
+                    </strong>
                   </div>
 
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Montant :</span>
-                    <strong className="text-white font-mono text-sm">{selectedPlan.priceHTG} Gourdes</strong>
+                    <strong className="text-white font-mono text-sm">
+                      {selectedPlan.priceHTG} Gourdes
+                    </strong>
                   </div>
 
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Numéro :</span>
-                    <strong className="text-white font-mono">+509 {formatPhone(phoneNumber)}</strong>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1 border-t border-[#1A2338]">
-                    <span className="text-slate-400">Moyen de paiement :</span>
-                    <strong className="text-white uppercase font-semibold">
-                      {paymentMethod === 'moncash' ? 'MonCash (Digicel)' : 'NatCash (Natcom)'}
+                    <strong className="text-white font-mono">
+                      +509 {formatPhone(phoneNumber)}
                     </strong>
                   </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Moyen de paiement :</span>
+                    <strong className="text-white uppercase font-semibold">
+                      {paymentMethod === 'moncash'
+                        ? 'MonCash (Digicel)'
+                        : 'NatCash (Natcom)'}
+                    </strong>
+                  </div>
+
+                  {tranzakTxId && (
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span>Réf. Tranzak :</span>
+                      <strong className="text-slate-300 font-mono text-[11px]">{tranzakTxId}</strong>
+                    </div>
+                  )}
+
+                  {activatedDetails && (
+                    <div className="pt-2.5 border-t border-[#1A2338] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Date d’achat :</span>
+                        <strong className="text-slate-200 font-mono text-[11px]">
+                          {activatedDetails.purchaseDateFormatted}
+                        </strong>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Fin d’abonnement :</span>
+                        <strong className="text-emerald-400 font-mono text-[11px]">
+                          {activatedDetails.endDateFormatted}
+                        </strong>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Bouton pour effectuer un autre paiement */}
@@ -679,7 +893,6 @@ export default function App() {
             )}
           </AnimatePresence>
         </div>
-
       </div>
 
       {/* FOOTER MINIMAL POUR SMARTPHONE */}
@@ -694,9 +907,7 @@ export default function App() {
             iflextv.film@gmail.com
           </a>
         </div>
-        <div>
-          © 2026 IFlex Stream. Tous droits réservés.
-        </div>
+        <div>© 2026 IFlex Stream. Tous droits réservés.</div>
       </footer>
     </div>
   );
